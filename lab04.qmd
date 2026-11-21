@@ -1,19 +1,26 @@
 ---
-title: "BEE 4750 Lab 4: Simulation-Optimization"
+title: "BEE 4750 Lab 4: Scenario Trees and Sequential Decisions"
+date: last-modified
 format:
-    html:        
+    html:
         warning: true
         error: true
-        mermaid:
-            theme: forest
     ipynb:
         warning: true
         error: true
         code-annotation: below
+    pdf:
+        include-in-header:
+           text: |
+            \usepackage{fvextra}
+            \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+            \DefineVerbatimEnvironment{OutputCode}{Verbatim}{breaklines,commandchars=\\\{\}}
+execute:
+    echo: true
 engine: julia
 julia:
-    exeflags: ["+1.10.4"]
-format-links: []
+  exeflags: ["+1.11.5"]
+format-links: [pdf, ipynb]
 ---
 
 ::: {.content-visible when-format="ipynb"}
@@ -22,23 +29,25 @@ format-links: []
 **ID**:
 :::
 
-::: {.callout-important icon="false"}
+::: {.callout-important icon=false}
 ### Due Date
 
-Friday, 11/17/23, 9:00pm
+Tuesday, November 24, 9:00pm
 :::
 
 ::: {.content-visible when-format="html"}
-::: callout-caution
-If you are enrolled in the course, make sure that you use the GitHub Classroom link provided in Ed Discussion, or you may not be able to get help if you run into problems.
 
-Otherwise, you can [find the Github repository here](https://github.com/BEE4750/lab04).
+:::{.callout-caution}
+
+If you are enrolled in the course, use the assignment link posted on Ed Discussion so that we can find your repository if you need help.
+
+Otherwise, you can [find the GitHub repository here]({{< var github_org.repo >}}/lab04).
+
 :::
+
 :::
 
 ## Setup
-
-The following code should go at the top of most Julia scripts; it will load the local package environment and install any needed packages. You will see this often and shouldn't need to touch it.
 
 ```{julia}
 #| output: false
@@ -48,184 +57,180 @@ Pkg.activate(".")
 Pkg.instantiate()
 ```
 
+## Introduction
+
+### The Reservoir
+
+A water-supply reservoir serves a city and an irrigation district through a four-month season, June to September. Storage and flows are in units of one million m^3^.
+
+- The reservoir holds up to 8 units and is full on June 1.
+- At the start of each month the operator chooses a **release** $r$, in whole units, before knowing that month's inflow. The release can be no more than what is stored and no more than the demand of 4 units.
+- Then the month's **inflow** $I$ arrives, and anything above 8 units spills over, so with $s$ units stored at the start of the month, next month's storage is $\min(s - r + I,\ 8)$.
+
+The first unit released in a month covers the city's essential use. Later units cover the rest of the city's demand and then irrigation, so each additional unit released has diminishing value:
+
+| Release in a month (units) | 0 | 1 | 2 | 3 | 4 |
+|:---|--:|--:|--:|--:|--:|
+| **Benefit** (\$100,000) | 0 | 10 | 17 | 20 | 21 |
+
+Each month is either **dry** or **wet**. Late-summer storms are smaller, so a wet month brings less water in August and September:
+
+| Month | June | July | August | September |
+|:---|--:|--:|--:|--:|
+| Inflow in a dry month (units) | 0 | 0 | 0 | 0 |
+| Inflow in a wet month (units) | 4 | 4 | 2 | 2 |
+
+With no forecasted information, each month is dry with probability 0.5, independent of the other months. A seasonal climate forecast shifts those operational probabilities.
+
+Water left in the reservoir on October 1 carries over to next year. By default it is worth nothing (the reservoir refills over the winter).
+
+A common default rule, the **standard operating policy**, releases the full demand whenever the reservoir holds it: $r = \min(s, 4)$.
+
+The code below stores these values and defines two functions that the rest of the lab uses: `benefit(r)` looks up the benefit of releasing `r` units in a month, and `next_storage(s, r, inflow)` gives next month's storage from this month's storage `s`, release `r`, and inflow.
+
 ```{julia}
 #| output: false
 
-using Random # for random seeds
-using Distributions # statistical distribution interface
-using Roots # find zeros of functions
-using Metaheuristics # search algorithms
-using Plots # plotting
+# Storage and flows are in units of 1 million cubic meters, and
+# benefits in $100,000
+capacity = 8                          # storage capacity
+start_storage = 8                     # storage on June 1 (full)
+max_release = 4                       # demand: most usable in a month
+benefit_table = [0, 10, 17, 20, 21]   # benefit of releasing 0 to 4
+months = ["June", "July", "August", "September"]
+n_months = length(months)
+inflow_dry = [0, 0, 0, 0]             # dry-month inflow, June to Sept.
+inflow_wet = [4, 4, 2, 2]             # wet-month inflow, June to Sept.
+
+# Benefit of releasing r units in a month (releasing 0 is the first
+# entry of the table)
+benefit(r) = benefit_table[r + 1]
+
+# Storage at the start of next month: release r from storage s, then
+# the month's inflow arrives; anything above capacity spills
+next_storage(s, r, inflow) = min(s - r + inflow, capacity)
 ```
 
-::: {.cell .markdown}
-## Overview
+::: {.callout-note}
+## Two Ways to Work Through This Lab
 
-In this lab, you will experiment with simulation-optimization with the shallow lake problem. The goal of this experimentation is to get an understanding of how to work with simulation-optimization methods and the impact of some choices involved in using these methods.
-
-Free free to delete some of the illustrative cells and code blocks in your notebook as you go through and solve the lab problems...this might help reduce some potential confusion while grading about what your answer is.
+You can do the coding either in this notebook (`lab04.ipynb`) or in the plain script `lab04.jl`, whichever you prefer; both contain the same problems. Either way, the written parts go on the separate **Activity Sheet** (handed out in class), which you can hand in at the end of class or submit to Gradescope as a PDF by 9pm on Tuesday; you don't need to submit your code.
 :::
 
-::: {.cell .markdown}
-## Introduction
+## Problem 1: The Scenario Tree
 
-Due to ongoing economic activity, a town emits phosphorous into a shallow lake (with a concentration of $a_t$), which also receives non-point source runoff (concentration $y_t$) from the surrounding area. The concentration of the lake at time $t+1$ is given by
-$$X_{t+1} = X_t + a_t + y_t + \frac{X_t^q}{1+X_t^q} - bX_t,$$
+Before writing any code, complete Problem 1 on the Activity Sheet: write down the transition function, and sketch the scenario tree for June and July.
 
-where:
+## Problem 2: Dynamic Programming
 
-| Parameter | Value |
-| :------: | :------ |
-| $a_t$ | point-source phosphorous concentration from the town |
-| $y_t$ | non-point-source phosphorous concentration |
-| $q$ | rate at which phosphorous is recycled from sediment |
-| $b$| rate at which phosphorous leaves the lake |
+Start with Problem 2a on the Activity Sheet: write down the Bellman equation for this reservoir. Then implement it.
 
-and $X_0 = 0$, $y_t \sim LogNormal(\log(0.03), 0.25)$, $q=2.5$, and $b=0.4$.
+The function below solves the problem by dynamic programming, working backward from September (backward induction). Its inputs are `prob_dry`, the probability that a month is dry, and `carryover_value`, the value per unit of water left on October 1. `value_table` holds $V_t(s)$, and `policy_table` holds the release that achieves it. Storage $s$ is kept in row $s + 1$ of each table, because Julia arrays start at 1. Month $t$ (1 for June to 4 for September) is in column $t$, and column 5 of `value_table` holds the terminal value $V_5(s)$.
 
-The goal of the optimization is to maximize the town's average phosphorous concentration releases (as a proxy of economic activity): $\max \sum_{t=1}^T a_t / T$ over a 100-year period. We have decided (initially) that an acceptable solution is one which will result in the lake eutrophying no more than 10% of the time.
-
-The non-point source samples can be sampled using the following code block:
-:::
-```{julia}
-Random.seed!(1)
-
-T = 100 # length of simualtion
-n_samples = 1_000 # replace with number of samples if you experiment
-
-P_distribution = LogNormal(log(0.03), 0.25)
-y = rand(P_distribution, (T, n_samples)) # sample a T x n_samples matrix
-```
-
-We write the lake model as a function:
+Each of the four TODOs is one part of your Bellman equation: the terminal value, the largest release allowed, next month's storage after a dry and after a wet month, and this month's benefit plus the expected `value_table` entry at next month's storage. Replace each `missing` with the code for that part.
 
 ```{julia}
-# lake function model
-# inputs:
-#   a: vector of point-source releases (to be optimized)
-#   y: randomly-sampled non-point sources
-#   q: lake phosphorous recycling rate
-#   b: phosphorous outflow rate
-# 
-# returns:
-#   series of lake phosphorous concentrations
-function lake(a, y, q, b, T)
-    X = zeros(T+1, size(y, 2))
-    # calculate states
-    for t = 1:T
-        X[t+1, :] = X[t, :] .+ a[t] .+ y[t, :] .+ (X[t, :].^q./(1 .+ X[t, :].^q)) .- b.*X[t, :]
+#| eval: false
+
+function backward_induction(prob_dry, carryover_value)
+    # best expected total from month t on, and the release that gets it
+    value_table = zeros(capacity + 1, n_months + 1)
+    policy_table = zeros(Int, capacity + 1, n_months)
+    for s in 0:capacity
+        # TODO: replace `missing` with the value of s units of water
+        # left on October 1
+        value_table[s + 1, n_months + 1] = missing
     end
-    return X
+    for t in n_months:-1:1
+        for s in 0:capacity
+            best_total = -Inf
+            # TODO: replace `missing` with the largest release allowed
+            # from storage s
+            for r in 0:missing
+                # TODO: replace each `missing` with next month's storage
+                # after a dry month and after a wet month
+                storage_if_dry = missing
+                storage_if_wet = missing
+                # TODO: replace `missing` with this month's benefit plus
+                # the expected value_table entry at next month's storage
+                total = missing
+                # keep the best release (ties keep the smaller one)
+                if total > best_total
+                    best_total = total
+                    value_table[s + 1, t] = total
+                    policy_table[s + 1, t] = r
+                end
+            end
+        end
+    end
+    return value_table, policy_table
 end
 ```
 
-::: {.cell .markdown}
-However, this isn't sufficient on its own! `Metaheuristics.jl` (and most simulation-optimization packages) require the use of a *wrapper* function, which accepts as inputs both parameters to be optimized (in this case, point-source releases `a`) and parameters which will be fixed (the others; see below for how to incorporate these into the syntax) and returns the required information for the optimization procedure.
-
-`Metaheuristics.jl` wants its optimizing wrapper function to return (in order):
-
-* the objective(s) (in this case, the mean of `a`, $\sum_t a_t / T$), 
-* a vector of the degrees to which the solution fails to achieve any inequality constraints (positive values indicate a larger failure, values below zero are considered acceptable)
-* a vector of the degrees to which the solution fails to achieve any equality constraints (only values of zero indicate success), which in this case is not relevant, so we just return `[0.0]`.
-
-:::
+Run it assuming equal probabilities of wet and dry months (`prob_dry = 0.5`) and no value on water left on October 1 (`carryover_value = 0`). The code below prints the expected total benefit and June's release, starting from a full reservoir:
 
 ```{julia}
-# function producing optimization outputs
-# inputs:
-#   a: vector of point-source releases (to be optimized)
-#   y: randomly-sampled non-point sources
-#   q: lake phosphorous recycling rate
-#   b: phosphorous outflow rate
-# 
-# returns:
-#   - objective: mean value of point-source releases
-#   - inequality constraint failure vector
-#   - equality constraint failure vector (in this case, always [0.0])
-function lake_opt(a, y, q, b, T, Xcrit)
-    X = lake(a, y, q, b, T)
-    # calculate exceedance of critical value
-    Pexceed = sum(X[T+1, :] .> Xcrit) / size(X, 2)
-    failconst = [Pexceed - 0.1] # replace 0.1 if you experiment with the failure probability
-    return mean(a), failconst, [0.0]
+#| eval: false
+
+value_table, policy_table = backward_induction(0.5, 0)
+println("Expected total benefit: ", value_table[start_storage + 1, 1])
+println("June release: ", policy_table[start_storage + 1, 1])
+```
+
+Print the whole policy, the best release for each storage level and month:
+
+```{julia}
+#| eval: false
+
+println("Storage: releases in June, July, August, September")
+for s in 0:capacity
+    println(s, ": ", policy_table[s + 1, :])
 end
 ```
 
-::: {.cell .markdown}
-To optimize using DE (differential evolution), use the following syntax:
-
-```julia
-results = optimize(f, bounds, DE(options=Options(f_calls_limit=max_evals)))
-```
-
-where `bounds` is a `Matrix` of lower bounds (first row) and upper bounds (last row), and `max_evals` is an integer for the maximum number of evaluations. 
-
-* For example, to set bounds for all decision variables between 0 and 0.5, you can use 
-```julia
-bounds = [zeros(T) 0.5ones(T)]'
-```
-* Increasing `max_evals` can help you find a better solution, but at a larger computational expense.
-* You can use an anonymous function to fix values for non-optimized parameters, *e.g.*
-```julia
-y = ...
-q = ...
-b = ...
-T = ...
-Xcrit = ...
-results = optimize(a -> lake_opt(a, y, q, b, t, Xcrit), bounds, DE(options=Options(f_calls_limit=max_evals)))
-```
-
-
-Then to get the approximated minimum value:
-
-```julia
-fx = minimum(result)
-```
-
-and the approximated minimizing value:
-
-```julia
-x = minimizer(result)
-```
-
-The last piece is to get the critical value (to identify failures), which we can do using `Roots.jl`, which finds zeros of functions:
-:::
+The function below follows a policy through one sequence of inflows and returns the releases and the storage left on October 1. Complete its two TODOs: the release the policy gives for this month and storage, and the storage at the start of next month. Running the cell then prints the releases in the driest summer (every month dry) and the wettest summer (every month wet). Record these, the expected total benefit, and June's release in Table 1 on the Activity Sheet.
 
 ```{julia}
-# define a function whose zeros are the critical values
-P_flux(x) = (x^q/(1+x^q)) - b*x
-# use Roots.find_zero() to find the non-eutrophication and non-zero critical value; we know from visual inspection in class that this is bounded between 0.1 and 1.5.
-Xcrit = find_zero(P_flux, (0.1, 1.5))
+#| eval: false
+
+function follow_policy(policy_table, inflows)
+    releases = zeros(Int, n_months)
+    storage = start_storage
+    for t in 1:n_months
+        # TODO: replace `missing` with the policy's release in month t
+        # from this storage
+        releases[t] = missing
+        # TODO: replace `missing` with the storage at the start of
+        # next month
+        storage = missing
+    end
+    return releases, storage
+end
+
+driest_releases, driest_storage_left =
+    follow_policy(policy_table, inflow_dry)
+wettest_releases, wettest_storage_left =
+    follow_policy(policy_table, inflow_wet)
+println("Driest summer: ", driest_releases)
+println("Wettest summer: ", wettest_releases)
 ```
 
+## Problem 3 (Optional): Extensions of the Basic DP Model
 
-## Problems
+If you finish Problems 1 and 2, start with Problem 3a on the Activity Sheet, which compares the policy from Problem 2 with the standard operating policy. Work out the standard operating policy's releases in the driest and wettest summers by hand, and each summer's total benefit under both policies.
 
-### Problem 1 (2 points)
+For Problem 3b, re-solve the problem with `backward_induction` and `follow_policy` for each case in Table 2 on the Activity Sheet: a wet outlook, a drought outlook, and values of 4 and 8 per unit for water left on October 1. For each case, find June's release, the expected total value (the expected benefit plus the expected value of the water left on October 1), and the releases in the driest and wettest summers.
 
-Using the default setup above, find the approximate optimum value. What is the value of the objective function, and how many failures (you can evaluate the `lake` function using your solution to find how many end-values are above the critical value).
+```{julia}
+#| eval: false
 
-### Problem 2 (5 points)
+outlook_prob_dry = [0.2, 0.8, 0.5, 0.5]
+carryover_values = [0, 0, 4, 8]
+for i in 1:length(outlook_prob_dry)
+    # TODO: solve the case with outlook_prob_dry[i] and
+    # carryover_values[i], then print June's release, the expected
+    # total value, and the releases in the driest and wettest summers
+end
+```
 
-::: {.cell .markdown}
-Feel free to experiment with some of the degrees of freedom in finding the optimum value. For example:
-
-* What failure probability are you using to characterize acceptable solutions?
-* How many Monte Carlo samples are you using?
-* What bounds are you searching over for the releases?
-* How many function evaluations are you using for the search?
-* What is the impact of different [`Metaheuristics.jl` algorithms](https://docs.juliahub.com/Metaheuristics/aJ70z/3.2.12/algorithms/)?
-
-Note that you might want to modify some of these together: for example, lower acceptable failure probabilities often require more function evaluations to find acceptable values, and more Monte Carlo samples increase computational expense, so fewer function evaluations may be completed in the same time.
-
-Provide a description of what you've modified and why. What was the new solution that you found? Does it satisfy the constraints?
-:::
-
-### Problem 3 (3 points)
-
-What did you learn about the use of these methods? Compare with your experience with linear programming from earlier in the semester.
-
-
-## References
-
-Put any consulted sources here, including classmates you worked with/who helped you.
+Record your results in Table 2, then answer Problem 3c on the Activity Sheet.

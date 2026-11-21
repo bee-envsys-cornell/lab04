@@ -1,0 +1,77 @@
+---
+title: "Lab 4 Activity Sheet"
+subtitle: "BEE 4750/5750, Fall 2026"
+format:
+    pdf:
+        geometry:
+            - left=0.5in
+            - right=0.5in
+            - top=1in
+            - bottom=1in
+        include-in-header:
+            text: |
+                \usepackage{scrlayer-scrpage}
+                \rohead{\textbf{Name:} \underline{\hspace{3in}}}
+                \usepackage{array}
+                \usepackage{tabularx}
+                \renewcommand{\arraystretch}{1.5}
+---
+
+***Name***: \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+***NetID***: \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+This sheet covers the written parts of Lab 4 (Scenario Trees and Sequential Decisions). Do the coding in `lab04.ipynb` or `lab04.jl`; fill out this sheet, and hand it in at the end of class (or scan it and submit it to Gradescope by 9pm on Tuesday, November 24; you don't need to submit your code). See `lab04.ipynb` or `lab04.pdf` for the reservoir's description, parameter values, and problem statements. Problem 3 is optional, for those who finish Problems 1 and 2.
+
+## Problem 1: The Scenario Tree
+
+**(a)** Write down the transition function (next month's storage given this month's storage, release, and inflow), including the limits on the release.
+\vspace{1.8in}
+
+**(b)** Sketch the scenario tree for June and July, assuming the probability that each month is dry is 0.5. Treat June's decision as the root node, then the two July decision nodes and the four August nodes. Label each branch with its inflow and probability, and compute the probability of reaching each August node.
+
+\newpage
+
+## Problem 2: Dynamic Programming
+
+**(a)** Write down the Bellman equation for the value function $V_t(s)$, including the limits on the release and the terminal value $V_5(s)$. Here $V_t(s)$ is the largest expected total value (the benefits from month $t$ on plus the value of water left on October 1) when month $t$ starts with storage $s$, and months $t = 1, \ldots, 4$ are June to September. Write $p$ for the probability that a month is dry and $c$ for the value per unit of water left on October 1.
+\vspace{2.4in}
+
+**(b)** **Table 1.** Fill in the releases corresponding to the largest benefit assuming no value on water and equal probabilities of wet and dry months.
+
+\begin{tabularx}{\textwidth}{@{}|>{\centering\arraybackslash}X|>{\centering\arraybackslash}p{0.9in}|>{\centering\arraybackslash}X|>{\centering\arraybackslash}X|@{}}
+\hline
+\textbf{Expected total benefit [\$100,000]} & \textbf{June release} & \textbf{Releases, driest summer (Jun--Sep)} & \textbf{Releases, wettest summer (Jun--Sep)} \\ \hline
+ & & & \\ \hline
+\end{tabularx}
+
+\newpage
+
+## Problem 3 (Optional): Extensions of the Basic DP Model
+
+**(a)** Fill in the releases in the driest and wettest summers, and each summer's total benefit.
+
+\begin{tabularx}{\textwidth}{@{}|X|>{\centering\arraybackslash}p{1.25in}|>{\centering\arraybackslash}p{0.8in}|>{\centering\arraybackslash}p{1.25in}|>{\centering\arraybackslash}p{0.8in}|@{}}
+\hline
+\textbf{Rule} & \textbf{Releases, driest summer} & \textbf{Benefit [\$100,000]} & \textbf{Releases, wettest summer} & \textbf{Benefit [\$100,000]} \\ \hline
+Standard operating policy (release $\min(s, 4)$) & & & & \\ \hline
+Policy from Problem 2 & & & & \\ \hline
+\end{tabularx}
+
+\vspace{0.2in}
+
+**(b)** Re-solve the problem for each case and fill in **Table 2**. Copy the first row from Table 1.
+
+\begin{tabularx}{\textwidth}{@{}|X|>{\centering\arraybackslash}p{1.1in}|>{\centering\arraybackslash}p{0.6in}|>{\centering\arraybackslash}p{0.95in}|>{\centering\arraybackslash}p{1.1in}|>{\centering\arraybackslash}p{1.1in}|@{}}
+\hline
+\textbf{Probability a month is dry} & \textbf{Value of water left on Oct 1 [\$100,000 per unit]} & \textbf{June release} & \textbf{Expected total value [\$100,000]} & \textbf{Releases, driest summer} & \textbf{Releases, wettest summer} \\ \hline
+0.5 (no forecast) & 0 & & & & \\ \hline
+0.2 (wet outlook) & 0 & & & & \\ \hline
+0.8 (drought outlook) & 0 & & & & \\ \hline
+0.5 (no forecast) & 4 & & & & \\ \hline
+0.5 (no forecast) & 8 & & & & \\ \hline
+\end{tabularx}
+
+\vspace{0.2in}
+
+**(c)** The value of water left on October 1 is a modeling choice. How does it impact the release decision in June?
